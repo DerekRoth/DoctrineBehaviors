@@ -1,7 +1,8 @@
 <?php
 
-namespace Tests\Knp\DoctrineBehaviors\ORM;
+namespace tests\Knp\DoctrineBehaviors\ORM;
 
+use Doctrine\ORM\Configuration;
 use Doctrine\ORM\Mapping\Driver\AnnotationDriver;
 use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\Repository\DefaultRepositoryFactory;
@@ -37,7 +38,7 @@ trait EntityManagerProvider
         $config = is_null($config) ? $this->getAnnotatedConfig() : $config;
         $em = EntityManager::create($conn, $config, $evm ?: $this->getEventManager());
 
-        $schema = array_map(function($class) use ($em) {
+        $schema = array_map(function ($class) use ($em) {
             return $em->getClassMetadata($class);
         }, (array) $this->getUsedEntityFixtures());
 
@@ -49,9 +50,46 @@ trait EntityManagerProvider
     }
 
     /**
+     * EntityManager mock object together with
+     * annotation mapping driver and engine given
+     * by DB_ENGINE (pdo_mysql or pdo_pgsql)
+     * database in memory
+     *
+     * @return \Doctrine\ORM\EntityManager
+     */
+    protected function getDBEngineEntityManager()
+    {
+        if (DB_ENGINE == "pgsql") {
+            return $this->getEntityManager(
+                null,
+                null,
+                [
+                    'driver' => 'pdo_pgsql',
+                    'host' => DB_HOST,
+                    'dbname' => DB_NAME,
+                    'user' => DB_USER,
+                    'password' => DB_PASSWD
+                ]
+            );
+        } else {
+            return $this->getEntityManager(
+                null,
+                null,
+                [
+                    'driver' => 'pdo_mysql',
+                    'host' => DB_HOST,
+                    'dbname' => DB_NAME,
+                    'user' => DB_USER,
+                    'password' => DB_PASSWD
+                ]
+            );
+        }
+    }
+
+    /**
      * Get annotation mapping configuration
      *
-     * @return Doctrine\ORM\Configuration
+     * @return \Doctrine\ORM\Configuration
      */
     protected function getAnnotatedConfig()
     {
@@ -109,16 +147,26 @@ trait EntityManagerProvider
             ->will($this->returnValue('Doctrine\\ORM\\EntityRepository'))
         ;
 
-        $config
-            ->expects($this->any())
-            ->method('getQuoteStrategy')
-            ->will($this->returnValue(new DefaultQuoteStrategy))
-        ;
+        if (class_exists('Doctrine\ORM\Mapping\DefaultQuoteStrategy')) {
+            $config
+                ->expects($this->any())
+                ->method('getQuoteStrategy')
+                ->will($this->returnValue(new DefaultQuoteStrategy))
+            ;
+        }
+
+        if (class_exists('Doctrine\ORM\Repository\DefaultRepositoryFactory')) {
+            $config
+                ->expects($this->any())
+                ->method('getRepositoryFactory')
+                ->will($this->returnValue(new DefaultRepositoryFactory()))
+            ;
+        }
 
         $config
             ->expects($this->any())
-            ->method('getRepositoryFactory')
-            ->will($this->returnValue(new DefaultRepositoryFactory()))
+            ->method('getDefaultQueryHints')
+            ->will($this->returnValue([]))
         ;
 
         return $config;

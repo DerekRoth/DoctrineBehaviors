@@ -24,9 +24,13 @@ class TranslatableTest extends \PHPUnit_Framework_TestCase
     {
         $em = new EventManager;
 
-        $em->addEventSubscriber(new \Knp\DoctrineBehaviors\ORM\Translatable\TranslatableListener(
+        $em->addEventSubscriber(new \Knp\DoctrineBehaviors\ORM\Translatable\TranslatableSubscriber(
             new ClassAnalyzer(),
             false,
+            function()
+            {
+                return 'en';
+            },
             function()
             {
                 return 'en';
@@ -82,6 +86,67 @@ class TranslatableTest extends \PHPUnit_Framework_TestCase
     /**
      * @test
      */
+    public function should_update_and_add_new_translations()
+    {
+        $em = $this->getEntityManager();
+
+        $entity = new \BehaviorFixtures\ORM\TranslatableEntity();
+        $entity->translate('en')->setTitle('awesome');
+        $entity->translate('ru')->setTitle('удивительный');
+        $entity->mergeNewTranslations();
+
+        $em->persist($entity);
+        $em->flush();
+        $id = $entity->getId();
+        $em->clear();
+
+        $entity = $em
+            ->getRepository('BehaviorFixtures\ORM\TranslatableEntity')
+            ->find($id)
+        ;
+
+        $this->assertEquals(
+            'awesome',
+            $entity->translate('en')->getTitle()
+        );
+
+        $this->assertEquals(
+            'удивительный',
+            $entity->translate('ru')->getTitle()
+        );
+
+        $entity->translate('en')->setTitle('great');
+        $entity->translate('fr', false)->setTitle('fabuleux');
+        $entity->mergeNewTranslations();
+
+        $em->persist($entity);
+        $em->flush();
+        $em->clear();
+
+        $entity = $em
+            ->getRepository('BehaviorFixtures\ORM\TranslatableEntity')
+            ->find($id)
+        ;
+
+        $this->assertEquals(
+            'great',
+            $entity->translate('en')->getTitle()
+        );
+
+        $this->assertEquals(
+            'fabuleux',
+            $entity->translate('fr')->getTitle()
+        );
+
+        $this->assertEquals(
+            'удивительный',
+            $entity->translate('ru')->getTitle()
+        );
+    }
+
+    /**
+     * @test
+     */
     public function translate_method_should_always_return_translation_object()
     {
         $em = $this->getEntityManager();
@@ -97,7 +162,7 @@ class TranslatableTest extends \PHPUnit_Framework_TestCase
     /**
      * @test
      */
-    public function listener_should_configure_entity_with_current_locale()
+    public function subscriber_should_configure_entity_with_current_locale()
     {
         $em = $this->getEntityManager();
 
@@ -119,26 +184,45 @@ class TranslatableTest extends \PHPUnit_Framework_TestCase
     /**
      * @test
      */
-    public function should_have_ontToMany_relation()
+    public function subscriber_should_configure_entity_with_default_locale()
     {
         $em = $this->getEntityManager();
 
-        $meta = $em->getClassMetadata('BehaviorFixtures\ORM\TranslatableEntityTranslation');
-        $this->assertEquals(
+        $entity = new \BehaviorFixtures\ORM\TranslatableEntity();
+        $entity->setTitle('test'); // magic method
+        $entity->mergeNewTranslations();
+        $em->persist($entity);
+        $em->flush();
+        $id = $entity->getId();
+        $em->clear();
+
+        $entity = $em->getRepository('BehaviorFixtures\ORM\TranslatableEntity')->find($id);
+
+        $this->assertEquals('en', $entity->getDefaultLocale());
+        $this->assertEquals('test', $entity->getTitle());
+        $this->assertEquals('test', $entity->translate($entity->getDefaultLocale())->getTitle());
+        $this->assertEquals('test', $entity->translate('fr')->getTitle());
+    }
+
+    /**
+     * @test
+     */
+    public function should_have_oneToMany_relation()
+    {
+        $this->assertTranslationsOneToManyMapped(
             'BehaviorFixtures\ORM\TranslatableEntity',
-            $meta->getAssociationTargetClass('translatable')
+            'BehaviorFixtures\ORM\TranslatableEntityTranslation'
         );
+    }
 
-        $meta = $em->getClassMetadata('BehaviorFixtures\ORM\TranslatableEntity');
-        $this->assertEquals(
-            'BehaviorFixtures\ORM\TranslatableEntityTranslation',
-            $meta->getAssociationTargetClass('translations')
-        );
-        $this->assertTrue($meta->isAssociationInverseSide('translations'));
-
-        $this->assertEquals(
-            ClassMetadataInfo::ONE_TO_MANY,
-            $meta->getAssociationMapping('translations')['type']
+    /**
+     * @test
+     */
+    public function should_have_oneToMany_relation_when_translation_class_name_is_custom()
+    {
+        $this->assertTranslationsOneToManyMapped(
+            'BehaviorFixtures\ORM\TranslatableCustomizedEntity',
+            'BehaviorFixtures\ORM\Translation\TranslatableCustomizedEntityTranslation'
         );
     }
 
@@ -179,5 +263,29 @@ class TranslatableTest extends \PHPUnit_Framework_TestCase
 
         $em->refresh($entity);
         $this->assertNotEquals('Hallo', $entity->translate('nl')->getTitle());
+    }
+
+    /**
+     * Asserts that the one to many relationship between translatable and translations is mapped correctly.
+     *
+     * @param string $translatableClass The class name of the translatable entity
+     * @param string $translationClass  The class name of the translation entity
+     */
+    private function assertTranslationsOneToManyMapped($translatableClass, $translationClass)
+    {
+        $em = $this->getEntityManager();
+
+        $meta = $em->getClassMetadata($translationClass);
+        $this->assertEquals($translatableClass, $meta->getAssociationTargetClass('translatable'));
+
+        $meta = $em->getClassMetadata($translatableClass);
+        $this->assertEquals($translationClass, $meta->getAssociationTargetClass('translations'));
+
+        $this->assertTrue($meta->isAssociationInverseSide('translations'));
+
+        $this->assertEquals(
+            ClassMetadataInfo::ONE_TO_MANY,
+            $meta->getAssociationMapping('translations')['type']
+        );
     }
 }
